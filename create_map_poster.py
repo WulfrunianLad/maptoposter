@@ -99,37 +99,54 @@ THEME = None  # Will be loaded later
 
 def create_gradient_fade(ax, color, location='bottom', zorder=10):
     """
-    Creates a fade effect at the top or bottom of the map.
+    Creates a fade effect at the top, bottom, left, or right of the map.
     """
-    vals = np.linspace(0, 1, 256).reshape(-1, 1)
-    gradient = np.hstack((vals, vals))
-    
     rgb = mcolors.to_rgb(color)
     my_colors = np.zeros((256, 4))
     my_colors[:, 0] = rgb[0]
     my_colors[:, 1] = rgb[1]
     my_colors[:, 2] = rgb[2]
-    
-    if location == 'bottom':
-        my_colors[:, 3] = np.linspace(1, 0, 256)
-        extent_y_start = 0
-        extent_y_end = 0.25
-    else:
-        my_colors[:, 3] = np.linspace(0, 1, 256)
-        extent_y_start = 0.75
-        extent_y_end = 1.0
 
-    custom_cmap = mcolors.ListedColormap(my_colors)
-    
     xlim = ax.get_xlim()
     ylim = ax.get_ylim()
+    x_range = xlim[1] - xlim[0]
     y_range = ylim[1] - ylim[0]
-    
-    y_bottom = ylim[0] + y_range * extent_y_start
-    y_top = ylim[0] + y_range * extent_y_end
-    
-    ax.imshow(gradient, extent=[xlim[0], xlim[1], y_bottom, y_top], 
-              aspect='auto', cmap=custom_cmap, zorder=zorder, origin='lower')
+
+    if location == 'bottom':
+        vals = np.linspace(0, 1, 256).reshape(-1, 1)
+        gradient = np.hstack((vals, vals))
+        my_colors[:, 3] = np.linspace(1, 0, 256)
+        y_bottom = ylim[0]
+        y_top = ylim[0] + y_range * 0.25
+        ax.imshow(gradient, extent=[xlim[0], xlim[1], y_bottom, y_top],
+                  aspect='auto', cmap=mcolors.ListedColormap(my_colors), zorder=zorder, origin='lower')
+
+    elif location == 'top':
+        vals = np.linspace(0, 1, 256).reshape(-1, 1)
+        gradient = np.hstack((vals, vals))
+        my_colors[:, 3] = np.linspace(0, 1, 256)
+        y_bottom = ylim[0] + y_range * 0.75
+        y_top = ylim[1]
+        ax.imshow(gradient, extent=[xlim[0], xlim[1], y_bottom, y_top],
+                  aspect='auto', cmap=mcolors.ListedColormap(my_colors), zorder=zorder, origin='lower')
+
+    elif location == 'left':
+        vals = np.linspace(0, 1, 256).reshape(1, -1)
+        gradient = np.vstack((vals, vals))
+        my_colors[:, 3] = np.linspace(1, 0, 256)
+        x_left = xlim[0]
+        x_right = xlim[0] + x_range * 0.25
+        ax.imshow(gradient, extent=[x_left, x_right, ylim[0], ylim[1]],
+                  aspect='auto', cmap=mcolors.ListedColormap(my_colors), zorder=zorder, origin='lower')
+
+    elif location == 'right':
+        vals = np.linspace(0, 1, 256).reshape(1, -1)
+        gradient = np.vstack((vals, vals))
+        my_colors[:, 3] = np.linspace(0, 1, 256)
+        x_left = xlim[0] + x_range * 0.75
+        x_right = xlim[1]
+        ax.imshow(gradient, extent=[x_left, x_right, ylim[0], ylim[1]],
+                  aspect='auto', cmap=mcolors.ListedColormap(my_colors), zorder=zorder, origin='lower')
 
 def get_edge_colors_by_type(G):
     """
@@ -213,17 +230,17 @@ def get_coordinates(city, country):
     else:
         raise ValueError(f"Could not find coordinates for {city}, {country}")
 
-def create_poster(city, country, point, dist, output_file):
+def create_poster(city, country, point, dist, output_file, orientation='portrait', island=False):
     print(f"\nGenerating map for {city}, {country}...")
-    
+
     # Progress bar for data fetching
-    with tqdm(total=3, desc="Fetching map data", unit="step", bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt}') as pbar:
+    with tqdm(total=5, desc="Fetching map data", unit="step", bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt}') as pbar:
         # 1. Fetch Street Network
         pbar.set_description("Downloading street network")
         G = ox.graph_from_point(point, dist=dist, dist_type='bbox', network_type='all')
         pbar.update(1)
         time.sleep(0.5)  # Rate limit between requests
-        
+
         # 2. Fetch Water Features
         pbar.set_description("Downloading water features")
         try:
@@ -232,7 +249,7 @@ def create_poster(city, country, point, dist, output_file):
             water = None
         pbar.update(1)
         time.sleep(0.3)
-        
+
         # 3. Fetch Parks
         pbar.set_description("Downloading parks/green spaces")
         try:
@@ -240,12 +257,36 @@ def create_poster(city, country, point, dist, output_file):
         except:
             parks = None
         pbar.update(1)
-    
+        time.sleep(0.3)
+
+        # 4. Fetch Train/Railway Lines
+        pbar.set_description("Downloading railway lines")
+        try:
+            railways = ox.features_from_point(point, tags={'railway': ['rail', 'subway', 'light_rail', 'tram']}, dist=dist)
+        except:
+            railways = None
+        pbar.update(1)
+        time.sleep(0.3)
+
+        # 5. Fetch Train Stations
+        pbar.set_description("Downloading train stations")
+        try:
+            stations = ox.features_from_point(point, tags={'railway': 'station', 'public_transport': 'station'}, dist=dist)
+        except:
+            stations = None
+        pbar.update(1)
+
     print("✓ All data downloaded successfully!")
-    
+
     # 2. Setup Plot
     print("Rendering map...")
-    fig, ax = plt.subplots(figsize=(12, 16), facecolor=THEME['bg'])
+    # Set figure size based on orientation
+    if orientation == 'landscape':
+        figsize = (16, 12)
+    else:  # portrait
+        figsize = (12, 16)
+
+    fig, ax = plt.subplots(figsize=figsize, facecolor=THEME['bg'])
     ax.set_facecolor(THEME['bg'])
     ax.set_position([0, 0, 1, 1])
     
@@ -255,8 +296,12 @@ def create_poster(city, country, point, dist, output_file):
         water.plot(ax=ax, facecolor=THEME['water'], edgecolor='none', zorder=1)
     if parks is not None and not parks.empty:
         parks.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=2)
-    
-    # Layer 2: Roads with hierarchy coloring
+
+    # Layer 2: Railway Lines
+    if railways is not None and not railways.empty:
+        railways.plot(ax=ax, edgecolor=THEME.get('railway', '#666666'), facecolor='none', linewidth=0.8, zorder=3)
+
+    # Layer 3: Roads with hierarchy coloring
     print("Applying road hierarchy colors...")
     edge_colors = get_edge_colors_by_type(G)
     edge_widths = get_edge_widths_by_type(G)
@@ -268,25 +313,81 @@ def create_poster(city, country, point, dist, output_file):
         edge_linewidth=edge_widths,
         show=False, close=False
     )
-    
-    # Layer 3: Gradients (Top and Bottom)
-    create_gradient_fade(ax, THEME['gradient_color'], location='bottom', zorder=10)
-    create_gradient_fade(ax, THEME['gradient_color'], location='top', zorder=10)
-    
-    # 4. Typography using Roboto font
+
+    # Layer 4: Train Stations
+    if stations is not None and not stations.empty:
+        # Filter to only point geometries for stations
+        stations_points = stations[stations.geometry.type == 'Point']
+        if not stations_points.empty:
+            stations_points.plot(ax=ax, color=THEME.get('station', '#FF0000'),
+                                markersize=8, marker='o', zorder=5, alpha=0.8)
+
+    # Get current axis limits before adding gradients or margins
+    xlim = ax.get_xlim()
+    ylim = ax.get_ylim()
+    x_range = xlim[1] - xlim[0]
+    y_range = ylim[1] - ylim[0]
+
+    # Layer 5: Gradients (Top, Bottom, Left, Right) - skip if island mode
+    if not island:
+        create_gradient_fade(ax, THEME['gradient_color'], location='bottom', zorder=10)
+        create_gradient_fade(ax, THEME['gradient_color'], location='top', zorder=10)
+        create_gradient_fade(ax, THEME['gradient_color'], location='left', zorder=10)
+        create_gradient_fade(ax, THEME['gradient_color'], location='right', zorder=10)
+    else:
+        # Island mode: add borders by expanding axis limits
+        # Double the borders on top, left, and right (2% -> 4%)
+        # Increase bottom border to ensure better separation between map and text (30%)
+        margin_top = 0.04
+        margin_sides = 0.04
+        margin_bottom = 0.30
+
+        ax.set_xlim(xlim[0] - x_range * margin_sides, xlim[1] + x_range * margin_sides)
+        ax.set_ylim(ylim[0] - y_range * margin_bottom, ylim[1] + y_range * margin_top)
+
+    # 6. Typography using Roboto font
+    # Start with default font sizes
+    main_font_size = 60
     if FONTS:
-        font_main = FontProperties(fname=FONTS['bold'], size=60)
+        font_main = FontProperties(fname=FONTS['bold'], size=main_font_size)
         font_top = FontProperties(fname=FONTS['bold'], size=40)
         font_sub = FontProperties(fname=FONTS['light'], size=22)
         font_coords = FontProperties(fname=FONTS['regular'], size=14)
     else:
         # Fallback to system fonts
-        font_main = FontProperties(family='monospace', weight='bold', size=60)
+        font_main = FontProperties(family='monospace', weight='bold', size=main_font_size)
         font_top = FontProperties(family='monospace', weight='bold', size=40)
         font_sub = FontProperties(family='monospace', weight='normal', size=22)
         font_coords = FontProperties(family='monospace', size=14)
-    
+
     spaced_city = "  ".join(list(city.upper()))
+
+    # Check if title fits and adjust font size if needed
+    temp_text = ax.text(0.5, 0.14, spaced_city, transform=ax.transAxes,
+                        color=THEME['text'], ha='center', fontproperties=font_main, zorder=11, alpha=0)
+
+    # Get the bounding box of the text in display coordinates
+    fig.canvas.draw()
+    bbox = temp_text.get_window_extent(renderer=fig.canvas.get_renderer())
+
+    # Get figure width in display coordinates
+    fig_bbox = fig.get_window_extent(renderer=fig.canvas.get_renderer())
+
+    # Calculate available width (90% of figure width to leave margins)
+    available_width = fig_bbox.width * 0.90
+
+    # If text is too wide, reduce font size
+    if bbox.width > available_width:
+        scale_factor = available_width / bbox.width
+        new_font_size = main_font_size * scale_factor
+        if FONTS:
+            font_main = FontProperties(fname=FONTS['bold'], size=new_font_size)
+        else:
+            font_main = FontProperties(family='monospace', weight='bold', size=new_font_size)
+        print(f"  Adjusting title font size from {main_font_size} to {new_font_size:.1f} to fit text")
+
+    # Remove temporary text
+    temp_text.remove()
 
     # --- BOTTOM TEXT ---
     ax.text(0.5, 0.14, spaced_city, transform=ax.transAxes,
@@ -363,11 +464,13 @@ Examples:
   python create_map_poster.py --list-themes
 
 Options:
-  --city, -c        City name (required)
-  --country, -C     Country name (required)
-  --theme, -t       Theme name (default: feature_based)
-  --distance, -d    Map radius in meters (default: 29000)
-  --list-themes     List all available themes
+  --city, -c          City name (required)
+  --country, -C       Country name (required)
+  --theme, -t         Theme name (default: feature_based)
+  --distance, -d      Map radius in meters (default: 29000)
+  --orientation, -o   Output orientation: portrait or landscape (default: portrait)
+  --island, -i        Island mode: no gradients, expanded borders (default: false)
+  --list-themes       List all available themes
 
 Distance guide:
   4000-6000m   Small/dense cities (Venice, Amsterdam old center)
@@ -412,6 +515,8 @@ Examples:
   python create_map_poster.py --city "New York" --country "USA"
   python create_map_poster.py --city Tokyo --country Japan --theme midnight_blue
   python create_map_poster.py --city Paris --country France --theme noir --distance 15000
+  python create_map_poster.py --city London --country UK --orientation landscape
+  python create_map_poster.py --city Venice --country Italy --island
   python create_map_poster.py --list-themes
         """
     )
@@ -420,6 +525,8 @@ Examples:
     parser.add_argument('--country', '-C', type=str, help='Country name')
     parser.add_argument('--theme', '-t', type=str, default='feature_based', help='Theme name (default: feature_based)')
     parser.add_argument('--distance', '-d', type=int, default=29000, help='Map radius in meters (default: 29000)')
+    parser.add_argument('--orientation', '-o', type=str, default='portrait', choices=['portrait', 'landscape'], help='Output orientation: portrait (12x16) or landscape (16x12) (default: portrait)')
+    parser.add_argument('--island', '-i', action='store_true', help='Island mode: no gradients, expanded borders to prevent text from obscuring map (default: false)')
     parser.add_argument('--list-themes', action='store_true', help='List all available themes')
     
     args = parser.parse_args()
@@ -458,7 +565,7 @@ Examples:
     try:
         coords = get_coordinates(args.city, args.country)
         output_file = generate_output_filename(args.city, args.theme)
-        create_poster(args.city, args.country, coords, args.distance, output_file)
+        create_poster(args.city, args.country, coords, args.distance, output_file, args.orientation, args.island)
         
         print("\n" + "=" * 50)
         print("✓ Poster generation complete!")
@@ -469,3 +576,4 @@ Examples:
         import traceback
         traceback.print_exc()
         os.sys.exit(1)
+

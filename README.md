@@ -40,6 +40,8 @@ python create_map_poster.py --city <city> --country <country> [options]
 | `--country` | `-C` | Country name | required |
 | `--theme` | `-t` | Theme name | feature_based |
 | `--distance` | `-d` | Map radius in meters | 29000 |
+| `--orientation` | `-o` | Output orientation: portrait (12x16) or landscape (16x12) | portrait |
+| `--island` | `-i` | Island mode: no gradients, expanded borders | false |
 | `--list-themes` | | List all available themes | |
 
 ### Examples
@@ -72,6 +74,12 @@ python create_map_poster.py -c "Mumbai" -C "India" -t contrast_zones -d 18000 # 
 python create_map_poster.py -c "London" -C "UK" -t noir -d 15000              # Thames curves
 python create_map_poster.py -c "Budapest" -C "Hungary" -t copper_patina -d 8000  # Danube split
 
+# Landscape orientation
+python create_map_poster.py -c "Tokyo" -C "Japan" -o landscape -t midnight_blue
+
+# Island mode (no gradients, expanded borders)
+python create_map_poster.py -c "Venice" -C "Italy" -i -t blueprint
+
 # List available themes
 python create_map_poster.py --list-themes
 ```
@@ -83,6 +91,19 @@ python create_map_poster.py --list-themes
 | 4000-6000m | Small/dense cities (Venice, Amsterdam center) |
 | 8000-12000m | Medium cities, focused downtown (Paris, Barcelona) |
 | 15000-20000m | Large metros, full city view (Tokyo, Mumbai) |
+
+### Orientation
+
+- **Portrait** (default): 12x16 inches - classic poster format, ideal for vertical wall spaces
+- **Landscape**: 16x12 inches - wider format, great for horizontal displays
+
+### Island Mode
+
+Island mode (`--island` or `-i`) disables gradient fades and adds expanded borders around the map:
+- No gradient vignette effects on edges
+- Top, left, right borders: 4% expanded margins
+- Bottom border: 30% expanded margin (ensures text doesn't obscure map)
+- Perfect for creating clean, framed map art with clear boundaries
 
 ## Themes
 
@@ -108,12 +129,40 @@ python create_map_poster.py --list-themes
 | `copper_patina` | Oxidized copper aesthetic |
 | `monochrome_blue` | Single blue color family |
 
+## Features
+
+### Map Layers
+- **Roads**: Hierarchical styling by road type (motorway, primary, secondary, tertiary, residential)
+- **Water features**: Rivers, lakes, and coastlines
+- **Parks**: Green spaces and recreational areas
+- **Railway lines**: Train, subway, light rail, and tram networks
+- **Train stations**: Station markers with customizable colors
+- **Gradient vignette**: Elegant edge fading (can be disabled with island mode)
+
+### Typography
+- **Auto-scaling text**: City names automatically resize to fit the poster width
+- **Spaced lettering**: City names use letter spacing for elegant display
+- **Coordinates**: Displays latitude/longitude of the city center
+- **Attribution**: OpenStreetMap contributor credit
+
+### Customization
+- **17 built-in themes** with distinct color palettes
+- **Custom themes**: Create your own by adding JSON files
+- **Flexible sizing**: Portrait or landscape orientation
+- **Adjustable map radius**: Control the area coverage (4km - 20km+)
+
 ## Output
 
 Posters are saved to `posters/` directory with format:
 ```
 {city}_{theme}_{YYYYMMDD_HHMMSS}.png
 ```
+
+Output specifications:
+- **Resolution**: 300 DPI (print quality)
+- **Portrait**: 12 x 16 inches (3600 x 4800 pixels)
+- **Landscape**: 16 x 12 inches (4800 x 3600 pixels)
+- **Format**: PNG with transparent backgrounds supported
 
 ## Adding Custom Themes
 
@@ -128,6 +177,8 @@ Create a JSON file in `themes/` directory:
   "gradient_color": "#FFFFFF",
   "water": "#C0C0C0",
   "parks": "#F0F0F0",
+  "railway": "#666666",
+  "station": "#FF0000",
   "road_motorway": "#0A0A0A",
   "road_primary": "#1A1A1A",
   "road_secondary": "#2A2A2A",
@@ -136,6 +187,16 @@ Create a JSON file in `themes/` directory:
   "road_default": "#3A3A3A"
 }
 ```
+
+**Theme Properties:**
+- `bg`: Background color
+- `text`: Text color for labels
+- `gradient_color`: Color for edge gradients (when not in island mode)
+- `water`: Water features (rivers, lakes)
+- `parks`: Parks and green spaces
+- `railway`: Railway/subway/tram lines (optional, defaults to #666666)
+- `station`: Train station markers (optional, defaults to #FF0000)
+- `road_*`: Road colors by hierarchy
 
 ## Project Structure
 
@@ -175,15 +236,17 @@ Quick reference for contributors who want to extend or modify the script.
 | `create_poster()` | Main rendering pipeline | Adding new map layers |
 | `get_edge_colors_by_type()` | Road color by OSM highway tag | Changing road styling |
 | `get_edge_widths_by_type()` | Road width by importance | Adjusting line weights |
-| `create_gradient_fade()` | Top/bottom fade effect | Modifying gradient overlay |
+| `create_gradient_fade()` | Edge fade effect (top/bottom/left/right) | Modifying gradient overlay |
 | `load_theme()` | JSON theme → dict | Adding new theme properties |
 
 ### Rendering Layers (z-order)
 
 ```
 z=11  Text labels (city, country, coords)
-z=10  Gradient fades (top & bottom)
-z=3   Roads (via ox.plot_graph)
+z=10  Gradient fades (top, bottom, left, right) - only when island mode is off
+z=5   Train stations (point markers)
+z=4   Roads (via ox.plot_graph)
+z=3   Railway lines
 z=2   Parks (green polygons)
 z=1   Water (blue polygons)
 z=0   Background color
@@ -202,17 +265,30 @@ residential, living_street  → Thinnest (0.4), lightest
 
 ### Adding New Features
 
-**New map layer (e.g., railways):**
-```python
-# In create_poster(), after parks fetch:
-try:
-    railways = ox.features_from_point(point, tags={'railway': 'rail'}, dist=dist)
-except:
-    railways = None
+**Railway and station support:**
+The script now automatically fetches and displays:
+- Railway lines (rail, subway, light_rail, tram)
+- Train/metro stations as point markers
 
-# Then plot before roads:
-if railways is not None and not railways.empty:
-    railways.plot(ax=ax, color=THEME['railway'], linewidth=0.5, zorder=2.5)
+Customize colors in your theme:
+```json
+{
+  "railway": "#666666",
+  "station": "#FF0000"
+}
+```
+
+**Adding other map layers (e.g., buildings):**
+```python
+# In create_poster(), after stations fetch:
+try:
+    buildings = ox.features_from_point(point, tags={'building': True}, dist=dist)
+except:
+    buildings = None
+
+# Then plot at appropriate z-order:
+if buildings is not None and not buildings.empty:
+    buildings.plot(ax=ax, facecolor=THEME['buildings'], edgecolor='none', zorder=2)
 ```
 
 **New theme property:**
